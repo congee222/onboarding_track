@@ -31,18 +31,25 @@
 | **Visual Scripting** | Unity 可视化编程 | 有 ScriptGraph/StateGraph 资产 |
 | **Prefab-Sequence** | 休闲/超休闲游戏 | 有编号的步骤 Prefab 序列 |
 
-内置**快速识别流程图**，按顺序回答 6 个 yes/no 问题即可匹配到对应模式。
+### Editor Play Mode 绕过策略
+
+手游项目常依赖 Firebase / Ads SDK / GDPR 同意弹窗等网络服务，导致 Editor Play Mode 无法正常进入。本 Skill 提供完整的绕过方案：
+
+- `#if UNITY_EDITOR` 跳过 Firebase RemoteConfig 网络请求
+- 跳过 GDPR/CTU 同意弹窗
+- 跳过 Ads SDK 初始化等待
+- 处理 ObscuredTypes（CodeStage AntiCheat Toolkit）加密字段
+- 强制满足教程触发条件（StageClearCount、OwnGold、BossClear 等）
+- 自动截图协程 + 卡住检测 + 异步 UI 等待
 
 ### 双模式 Excel 输出
 
 - **完整版**（含属性）：每个事件下列出所有属性行（事件名 + 属性名 + 类型 + 说明）
 - **精简版**（仅事件）：每个事件一行，不含属性
 
-Excel 格式严格遵循引力引擎批量添加事件模板规范：
-- A-E 列（事件信息）支持纵向合并
-- F-I 列（属性行）禁止合并
-- 事件名/属性名遵循命名规则（英文、字母开头、≤50字符）
-- 属性类型支持：文本、整数、浮点数、布尔值、日期、时间、列表
+Excel 生成支持两种模式：
+- **模板免依赖**（默认）：从零生成完整 .xlsx，无需上传引力引擎模板
+- **模板依赖**（可选）：复制引力引擎模板并替换内部 XML
 
 ## 📁 文件结构
 
@@ -50,10 +57,12 @@ Excel 格式严格遵循引力引擎批量添加事件模板规范：
 extract-tutorial-tracking/
 ├── SKILL.md                                    # 主工作流指引（AI 读取的核心指令）
 ├── references/
-│   ├── tutorial-system-patterns.md             # 6 种教程系统模式 + 识别流程图 + UI 元素命名参考
-│   └── gravity-engine-excel-format.md          # 引力引擎 Excel 格式详细规范 + XLSX 内部 XML 结构
+│   ├── tutorial-system-patterns.md             # 6 种教程系统模式 + 识别流程图 + ObscuredTypes + 条件类型表
+│   ├── gravity-engine-excel-format.md          # 引力引擎 Excel 格式规范 + 双模式生成 + XLSX 内部 XML 结构
+│   └── editor-playmode-bypass.md               # Play Mode 阻塞点绕过 + ObscuredTypes 写入 + 强制满足条件
 └── scripts/
-    └── GenerateTrackingExcel.cs                # C# Editor 脚本模板（通用 Excel 生成引擎）
+    ├── GenerateTrackingExcel.cs                # C# Editor 脚本（Excel 生成引擎，支持模板免依赖）
+    └── TutorialScreenshotCapture.cs            # C# Editor 脚本（Play Mode 自动截图 + 条件强制 + 卡住检测）
 ```
 
 ## 📦 安装
@@ -102,48 +111,57 @@ git submodule add https://github.com/congee222/onboarding_track.git .codely-cli/
 | 运行时截图 | ✅ | 需要 Play Mode + Game View |
 | 生成 Excel | ❌ | 不需要 Unity（用 C# Editor 脚本执行） |
 
-### 输出示例
+### 输出位置
 
-**埋点文档**（Markdown）：
-```markdown
-| 序号 | 点位中文名 | 英文名 | 所属阶段 | 截图文件 |
-|:---:|---|---|---|---|
-| 1 | 教程开始 | tutorial_start | 教程100 | p01_tutorial_start.png |
-| 2 | 点击垃圾桶 | trash_tap | 教程100 | p02_trash_tap.png |
-| ... | ... | ... | ... | ... |
-```
+所有产出统一在项目根目录的 `Tracking/` 文件夹：
 
-**Excel**（引力引擎格式）：
 ```
-事件名              | 事件显示名 | 是否接收 | 触发时机     | 事件说明     | 属性名         | 属性显示名 | 属性类型 | 属性说明
-tutorial_start      | 教程开始   | 是      | 游戏启动后…  | 教程100阶段  | tutorial_id   | 教程ID    | 整数    | 100
-(合并)              | (合并)    | (合并)  | (合并)      | (合并)      | tutorial_phase| 教程阶段  | 文本    | tutorial_100
+Tracking/
+├── Tutorial_Tracking_Plan.md              # 埋点方案文档
+├── tutorial_tracking_full.xlsx             # 引力引擎 Excel（完整版）
+├── tutorial_tracking_events_only.xlsx     # 引力引擎 Excel（精简版）
+├── GenerateTrackingExcel.cs               # Excel 生成脚本
+├── TutorialScreenshotCapture.cs            # 截图脚本
+└── screenshots/                           # P0 截图
 ```
 
 ## 🔧 技术细节
 
-### Excel 生成方案（无 Python 环境）
+### Excel 生成方案（模板免依赖）
 
-当项目环境中没有 Python/openpyxl 时，Skill 使用 C# Editor 脚本直接操作 XLSX 内部 XML：
+当不需要引力引擎模板时，Skill 使用 C# Editor 脚本从零构建 xlsx：
 
-1. 构建 `sharedStrings.xml`（去重字符串表）
-2. 构建 `sheet1.xml`（单元格数据 + 合并单元格定义）
-3. 复制引力引擎模板 `.xlsx`
-4. 用 `ZipArchive(Update mode)` 替换内部 XML 条目
+1. 生成 `[Content_Types].xml`、`_rels/.rels`、`xl/workbook.xml`、`xl/styles.xml`
+2. 构建 `xl/sharedStrings.xml`（去重字符串表）
+3. 构建 `xl/worksheets/sheet1.xml`（单元格数据 + 合并单元格定义）
+4. 用 `ZipArchive(Create mode)` 写入所有 XML 部件
 5. 使用 `UTF8Encoding(false)` 写入（无 BOM）
 
-### 截图方案
+### 截图方案（Play Mode）
 
-通过 Editor 脚本 + 反射控制教程状态：
-- 重置教程完成状态 → 触发指定教程步骤
-- 调用 `SetActiveFinger` / `SetActiveTextBox` / `SetActiveDim` 显示引导 UI
-- 截取 Game View（支持竖屏 1080×2340）
+通过 Editor 脚本在 Play Mode 下自动截图：
+
+1. `#if UNITY_EDITOR` 绕过 Firebase/Ads/GDPR 等网络依赖
+2. 强制满足教程条件（StageClearCount=999, OwnGold=9999999 等）
+3. 处理 ObscuredTypes 加密字段（修改 hiddenValue/fakeValue/inited）
+4. 轮询 CurTID 变化，自动截图 + OnClick 推进
+5. 卡住检测（3 次相同 TID 自动跳过）
+
+### ObscuredTypes 处理
+
+CodeStage AntiCheat Toolkit 是手游标配反作弊库：
+
+- **读取**：`.asset` 文件（YAML）中 `fakeValue` 字段即为实际值
+- **写入**：修改 ObscuredInt 内部字段 `hiddenValue`、`fakeValue`、`inited`
+- **限制**：`execute_csharp_script`（Roslyn）无法访问 Assembly-CSharp 类型，必须用 Editor 脚本
 
 ### 常见坑点
 
-- `Assets/Editor/` 可能有 asmdef 导致程序集隔离 → 放在 `Assets/1_Scripts/Editor/`
+- `Assets/Editor/` 可能有 asmdef 导致程序集隔离 → 放在无 asmdef 的文件夹
 - iOS Xcode 脚本在 Windows 上编译报错 → 用 `#if UNITY_IOS` 包裹
 - `execute_csharp_script`（Roslyn）无法访问 Assembly-CSharp → 用 Editor 脚本 + `[MenuItem]`
+- Firebase RemoteConfig 在 Editor 中无法连接 → `#if UNITY_EDITOR` 跳过
+- ObscuredTypes 不能直接 `SetValue(int)` → 修改内部字段
 
 ## 📊 P0 筛选原则
 
@@ -161,7 +179,7 @@ tutorial_start      | 教程开始   | 是      | 游戏启动后…  | 教程10
 
 - [Codely CLI](https://www.tuanjie.com/) (Tuanjie Cowork)
 - Unity Editor（截图功能需要，其他功能不需要）
-- 引力引擎 Excel 模板（`引力引擎_批量添加事件模板.xlsx`，由使用方提供）
+- 引力引擎 Excel 模板（可选，模板免依赖模式不需要）
 
 ## 📄 License
 

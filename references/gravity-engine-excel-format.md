@@ -1,4 +1,4 @@
-# Gravity Engine (引力引擎) Batch Event Excel Format
+﻿# Gravity Engine (引力引擎) Batch Event Excel Format
 
 ## Template Structure
 
@@ -8,111 +8,152 @@ Based on `引力引擎_批量添加事件模板.xlsx`.
 
 | Column | Field | Description |
 |--------|-------|-------------|
-| A | 事件名 | English event name for code埋点. Letters/digits/underscore only, start with letter, not `$`, ≤50 chars |
+| A | 事件名 | English event name. Letters/digits/underscore only, start with letter, not `$`, ≤50 chars |
 | B | 事件显示名 | Chinese display name |
-| C | 是否接收 | Must be `是` (to stop receiving, toggle in Gravity Engine backend) |
-| D | 触发时机 | When this event fires (for developers to understand埋点 location) |
+| C | 是否接收 | Must be `是` |
+| D | 触发时机 | When this event fires |
 | E | 事件说明 | Additional notes |
-| F | 属性名 | English property name, same naming rules as event name |
+| F | 属性名 | English property name, same naming rules |
 | G | 属性显示名 | Chinese display name for property |
 | H | 属性类型 | One of: 文本, 整数, 浮点数, 布尔值, 日期, 时间, 列表 |
 | I | 属性说明 | Property notes |
 
 ### Merged Cells Rules
 
-- Columns A-E: Merge vertically when an event has multiple properties (one row per property)
-- Columns F-I: **Never merge** — each property is its own row
+- Columns A-E: Merge vertically when an event has multiple properties
+- Columns F-I: **Never merge**
 - If an event has 0 properties, still fill A-E, leave F-I empty
 
-### Row Layout
+## Two Generation Modes
 
-```
-Row 1: Headers (事件名 | 事件显示名 | 是否接收 | 触发时机 | 事件说明 | 属性名 | 属性显示名 | 属性类型 | 属性说明)
-Row 2: Event1  | Display1   | 是      | Trigger1  | Desc1     | prop1    | propDisp1  | type1    | propDesc1
-Row 3: (merged)| (merged)   | (merged)| (merged)  | (merged)  | prop2    | propDisp2  | type2    | propDesc2
-Row 4: Event2  | Display2   | 是      | Trigger2  | Desc2     | prop1    | propDisp1  | type1    | propDesc1
-...
-```
+### Mode 1: Template-Based (original)
 
-### XLSX Internal Structure (for programmatic generation)
+Copy the 引力引擎 template `.xlsx`, open with `ZipArchive(Update mode)`, replace `xl/sharedStrings.xml` and `xl/worksheets/sheet1.xml`.
 
-An .xlsx file is a ZIP containing:
-- `xl/sharedStrings.xml` — all unique string values, referenced by index
-- `xl/worksheets/sheet1.xml` — cell data with references to shared strings
-- `xl/styles.xml` — cell styles (from template, do not modify)
-- `xl/workbook.xml` — workbook metadata (from template)
+**Pros**: Preserves template styles (header colors, borders, fonts).
+**Cons**: Requires user to provide the template file.
 
-#### sharedStrings.xml
+### Mode 2: Template-Free (improved)
+
+Generate complete `.xlsx` from scratch by writing all XML parts into a new `ZipArchive(Create)`:
+- `[Content_Types].xml`
+- `_rels/.rels`
+- `xl/workbook.xml`
+- `xl/_rels/workbook.xml.rels`
+- `xl/styles.xml` (hardcoded styles: header bold white-on-blue, data with border)
+- `xl/sharedStrings.xml`
+- `xl/worksheets/sheet1.xml`
+
+**Pros**: No template file needed. Any user can generate Excel without uploading anything.
+**Cons**: Styles are hardcoded (blue header, thin borders) — may not match 引力引擎 template exactly, but functionally identical for import.
+
+## XLSX Internal Structure
+
+### styles.xml (template-free mode)
 
 ```xml
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="N" uniqueCount="N">
+<fonts count="2">
+  <font><sz val="11"/><name val="Calibri"/></font>
+  <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+</fonts>
+<fills count="3">
+  <fill><patternFill patternType="none"/></fill>
+  <fill><patternFill patternType="gray125"/></fill>
+  <fill><patternFill patternType="solid"><fgColor rgb="FF4472C4"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="2">
+  <border><left/><right/><top/><bottom/><diagonal/></border>
+  <border>
+    <left style="thin"><color rgb="FFD9D9D9"/></left>
+    <right style="thin"><color rgb="FFD9D9D9"/></right>
+    <top style="thin"><color rgb="FFD9D9D9"/></top>
+    <bottom style="thin"><color rgb="FFD9D9D9"/></bottom>
+    <diagonal/>
+  </border>
+</borders>
+<cellXfs count="3">
+  <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>           <!-- s=0: default -->
+  <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" ...>          <!-- s=1: header -->
+    <alignment horizontal="center" vertical="center" wrapText="1"/>
+  </xf>
+  <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" ...>          <!-- s=2: data -->
+    <alignment vertical="center" wrapText="1"/>
+  </xf>
+</cellXfs>
+```
+
+### [Content_Types].xml (template-free mode)
+
+```xml
+<Types xmlns="...">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>
+```
+
+### workbook.xml + rels (template-free mode)
+
+```xml
+<!-- xl/workbook.xml -->
+<workbook xmlns="...">
+  <sheets><sheet name="事件" sheetId="1" r:id="rId1"/></sheets>
+</workbook>
+
+<!-- xl/_rels/workbook.xml.rels -->
+<Relationships xmlns="...">
+  <Relationship Id="rId1" Type=".../worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type=".../styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type=".../sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>
+```
+
+### sharedStrings.xml
+
+```xml
+<sst xmlns="..." count="N" uniqueCount="N">
   <si><t xml:space="preserve">字符串值</t></si>
-  ...
 </sst>
 ```
 
-- `count` = `uniqueCount` = number of unique strings
-- Use `System.Security.SecurityElement.Escape()` to escape special chars
+Use `System.Security.SecurityElement.Escape()` for XML escaping.
 
-#### sheet1.xml
+### sheet1.xml
 
 ```xml
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetPr/>
-  <dimension ref="A1:I{lastRow}"/>
-  <sheetViews><sheetView showGridLines="0" tabSelected="1" workbookViewId="0">
-    <selection activeCell="A1" sqref="A1"/>
-  </sheetView></sheetViews>
+<worksheet xmlns="...">
+  <sheetPr/><dimension ref="A1:I{lastRow}"/>
+  <sheetViews><sheetView showGridLines="0" tabSelected="1" workbookViewId="0">...</sheetView></sheetViews>
   <sheetFormatPr defaultColWidth="9" defaultRowHeight="16.8"/>
   <cols><col min="1" max="9" width="25" customWidth="1"/></cols>
   <sheetData>
     <row r="1" ht="25" customHeight="1" spans="1:9">
-      <c r="A1" s="1" t="s"><v>0</v></c>
-      ...
+      <c r="A1" s="1" t="s"><v>0</v></c>...
     </row>
     <row r="2" ht="25" customHeight="1" spans="1:9">
       <c r="A2" s="2" t="s"><v>5</v></c>
-      <c r="B2" s="2"/>  <!-- empty cell for merged rows -->
+      <c r="B2" s="2"/>  <!-- empty merged cell -->
       ...
     </row>
   </sheetData>
   <mergeCells count="N">
     <mergeCell ref="A2:A4"/>
-    ...
   </mergeCells>
 </worksheet>
 ```
 
-- `t="s"` means the value is a shared string index
-- `s="1"` = header style, `s="2"` = data style (from template's styles.xml)
-- Empty cells in merged ranges: output `<c r="X2" s="2"/>` (no value)
+- `t="s"` = shared string index
+- `s="1"` = header style, `s="2"` = data style
+- Empty cells in merged ranges: `<c r="X2" s="2"/>`
 
-#### Generation via C# Editor Script
+## Validation Checklist
 
-```csharp
-// 1. Build string list + index map
-// 2. Build row data with column→stringIndex mapping
-// 3. Generate sharedStrings.xml and sheet1.xml as StringBuilder
-// 4. Copy template xlsx, open with ZipArchive(Update mode), replace entries
-File.Copy(templatePath, outputPath, true);
-using (var fs = new FileStream(outputPath, FileMode.Open, FileAccess.ReadWrite))
-using (var archive = new ZipArchive(fs, ZipArchiveMode.Update))
-{
-    archive.GetEntry("xl/sharedStrings.xml")?.Delete();
-    using (var w = new StreamWriter(archive.CreateEntry("xl/sharedStrings.xml").Open(), new UTF8Encoding(false)))
-        w.Write(ssXml);
-    
-    archive.GetEntry("xl/worksheets/sheet1.xml")?.Delete();
-    using (var w = new StreamWriter(archive.CreateEntry("xl/worksheets/sheet1.xml").Open(), new UTF8Encoding(false)))
-        w.Write(sheetXml);
-}
-```
-
-### Validation Checklist
-
-- [ ] Header row (row 1) has all 9 column headers
+- [ ] Header row has all 9 column headers
 - [ ] Every event row has `是` in column C
 - [ ] No merged cells in columns F-I
-- [ ] Event names follow naming rules (no `$` prefix, ≤50 chars)
+- [ ] Event names follow naming rules
 - [ ] Property types use exact values: 文本/整数/浮点数/布尔值/日期/时间/列表
 - [ ] UTF-8 encoding without BOM for XML files inside xlsx
