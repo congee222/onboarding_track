@@ -1,0 +1,13 @@
+# Codely CLI
+.codely-cli/
+
+# Skill packaged file
+*.skill
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
